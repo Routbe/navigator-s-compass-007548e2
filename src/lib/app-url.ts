@@ -16,7 +16,15 @@
 import { APP_DOMAINS, normalizeHost, PRIMARY_DOMAIN } from "@/lib/app-domains";
 
 /** Hosts waarop we auth-callbacks vertrouwen. */
-const APPROVED_HOSTS: readonly string[] = [...APP_DOMAINS, "app.dlp.li", "maximilien.brussels"];
+const APPROVED_HOSTS: readonly string[] = [
+  ...APP_DOMAINS,
+  "app.dlp.li",
+  "maximilien.brussels",
+  // Lovable preview/publish hosts: OAuth state cookies are set on the live
+  // host, so previews must be allowed to keep the callback on the same host.
+  "lovable.app",
+  "lovableproject.com",
+];
 
 const LOCAL_HOSTS: readonly string[] = ["localhost", "127.0.0.1", "0.0.0.0"];
 
