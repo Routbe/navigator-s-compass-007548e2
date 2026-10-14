@@ -177,7 +177,7 @@ export async function handleAuthRequest({ request }: { request: Request }) {
         ? "missing_secret"
         : /DATABASE_URL/.test(raw)
           ? "missing_database"
-          : /websocket|ECONN|ENOTFOUND|ETIMEDOUT|connect|pool/i.test(raw)
+          : /websocket|ECONN|ENOTFOUND|ETIMEDOUT|\bconnect\b|\bpool\b/i.test(raw)
             ? "db_connect"
             : /relation|column|does not exist/i.test(raw)
               ? "db_error"
