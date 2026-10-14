@@ -88,10 +88,13 @@ function requestOrigin(request?: Request): string | null {
   return `${local ? proto : "https"}://${host}`;
 }
 
-/** The base URL OAuth callbacks are built on: configured, else approved host, else canonical. */
+/** The base URL OAuth callbacks are built on: the approved request host first, else configured, else canonical. */
 function baseUrlFor(request?: Request): string {
   const configured = env("BETTER_AUTH_URL") ?? env("NEXT_PUBLIC_APP_URL");
   const origin = requestOrigin(request);
+  // The state cookie is set on the request host; returning to a different
+  // configured host loses it → state_mismatch. Follow the live host instead.
+  if (origin && isApprovedHost(new URL(origin).host)) return origin;
   if (configured) {
     const base = configured.trim().replace(/\/+$/, "").replace(/\/api\/auth$/, "");
     const normalized = /^https?:\/\//.test(base) ? base : `https://${base}`;
