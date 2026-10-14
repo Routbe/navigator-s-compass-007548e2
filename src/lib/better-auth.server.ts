@@ -201,9 +201,12 @@ export function createRoutAuth(request?: Request) {
   if (oidc && discoveryUrl) {
     genericConfigs.push({ providerId: "oidc", discoveryUrl, ...oidc, scopes: ["openid", "email", "profile"], pkce: true });
   } else if (!oidc && !discoveryUrl) {
+    // Discover on the live (approved) request host so dev/preview never call a dead port.
+    const live = requestOrigin(request);
+    const issuerBase = live && isApprovedHost(new URL(live).host) ? live : canonicalAppUrl();
     genericConfigs.push({
       providerId: "oidc",
-      discoveryUrl: `${canonicalAppUrl()}/.well-known/openid-configuration`,
+      discoveryUrl: `${issuerBase}/.well-known/openid-configuration`,
       clientId: NATIVE_OIDC_CLIENT_ID,
       scopes: ["openid", "email", "profile"],
       pkce: true,
@@ -339,7 +342,17 @@ export function createRoutAuth(request?: Request) {
       "http://127.0.0.1:*",
       "https://*.lovableproject.com",
       "https://*.lovable.app",
-      ...(origin ? [origin] : []),
+      // Both split deployments (rout.be public, rout.dlp.li admin) + configured base.
+      "https://rout.dlp.li",
+      "https://www.rout.be",
+      ...[env("BETTER_AUTH_URL"), env("NEXT_PUBLIC_APP_URL")].flatMap((u) => {
+        try {
+          return u ? [new URL(/^https?:\/\//.test(u.trim()) ? u.trim() : `https://${u.trim()}`).origin] : [];
+        } catch {
+          return [];
+        }
+      }),
+      ...(origin && isApprovedHost(new URL(origin).host) ? [origin] : []),
     ],
     advanced: {
       // Always secure: production is https behind Vercel's proxy even when the

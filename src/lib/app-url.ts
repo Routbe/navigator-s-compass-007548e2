@@ -28,7 +28,12 @@ const APPROVED_HOSTS: readonly string[] = [
 
 const LOCAL_HOSTS: readonly string[] = ["localhost", "127.0.0.1", "0.0.0.0"];
 
-export const LOCAL_APP_URL = "http://localhost:3000";
+/** Local origin on the port the dev server actually listens on (sandbox: 8080). */
+function localAppUrl(): string {
+  const port = typeof process !== "undefined" ? process.env?.["PORT"]?.trim() : undefined;
+  return `http://localhost:${port && /^\d+$/.test(port) ? port : "8080"}`;
+}
+export const LOCAL_APP_URL = localAppUrl();
 export const FALLBACK_APP_URL = `https://${PRIMARY_DOMAIN}`;
 
 /** Het vaste pad van de Google-callback; identiek in dev en productie. */
