@@ -1,3 +1,4 @@
+import { isLiveActive } from "./live-presence-rules";
 /**
  * Connections Hub storage + public live-status fetchers. Server-only.
  * `verified` is derived here from real sign-in identities or a server-side bio-check — never from input.
@@ -10,6 +11,8 @@ type Row = Record<string, unknown>;
 
 export type IntegrationStatus = {
   title?: string;
+  /** ISO time of the last public activity (live-status window). */
+  lastActiveAt?: string;
   subtitle?: string;
   url?: string;
   image?: string | null;
@@ -71,6 +74,8 @@ export async function ssoHandles(userId: string): Promise<Record<string, string>
       } else if (p === "bluesky" && !out["bluesky"]) {
         const h = id.displayName && id.displayName.includes(".") ? id.displayName : await atHandleForDid(id.providerAccountId);
         if (h) out[h.endsWith(".wsocial.eu") ? "wsocial" : "bluesky"] = h.toLowerCase();
+      } else if (p === "mastodon" && !out["mastodon"] && id.displayName?.includes("@")) {
+        out["mastodon"] = id.displayName.toLowerCase();
       }
     }
   } catch (e) {
@@ -144,6 +149,7 @@ export async function fetchStatus(provider: string, handle: string): Promise<Int
         subtitle: push ? `${push.repo?.name ?? ""} · ${(push.payload?.commits?.at(-1)?.message ?? "").split("\n")[0]}`.slice(0, 120) : undefined,
         url: `https://github.com/${handle}`,
         image: `https://avatars.githubusercontent.com/${handle}`,
+        lastActiveAt: last?.created_at,
       };
     }
     case "gitlab": {
@@ -159,6 +165,7 @@ export async function fetchStatus(provider: string, handle: string): Promise<Int
         subtitle: last?.push_data?.commit_title?.slice(0, 120),
         url: `https://gitlab.com/${handle}`,
         image: u.avatar_url ?? null,
+        lastActiveAt: last?.created_at,
       };
     }
     case "wakatime": {
@@ -179,7 +186,12 @@ export async function fetchStatus(provider: string, handle: string): Promise<Int
         | { displayName?: string; followersCount?: number; avatar?: string; description?: string }
         | null;
       if (!j) return null;
+      const feed = (await getJson(`https://public.api.bsky.app/xrpc/app.bsky.feed.getAuthorFeed?actor=${encodeURIComponent(handle)}&limit=1&filter=posts_no_replies`)) as
+        | { feed?: { post?: { indexedAt?: string; record?: { createdAt?: string } } }[] }
+        | null;
+      const lastPost = feed?.feed?.[0]?.post;
       return {
+        lastActiveAt: lastPost?.record?.createdAt ?? lastPost?.indexedAt,
         bio: j.description?.slice(0, 300),
         title: j.displayName || `@${handle}`,
         subtitle: typeof j.followersCount === "number" ? `${j.followersCount.toLocaleString("nl-BE")} volgers` : undefined,
@@ -192,6 +204,7 @@ export async function fetchStatus(provider: string, handle: string): Promise<Int
       if (!acct) return null;
       const domain = handle.split("@")[1]!;
       return {
+        lastActiveAt: acct.last_status_at ?? undefined,
         title: acct.display_name || `@${handle}`,
         subtitle: `@${handle.split("@")[0]} · ${domain}`,
         bio: stripHtml(acct.note ?? "").slice(0, 300),
@@ -309,7 +322,7 @@ export async function fetchStatus(provider: string, handle: string): Promise<Int
   }
 }
 
-type MastodonAccount = { display_name?: string; note?: string; url?: string; avatar?: string; avatar_static?: string; followers_count?: number };
+type MastodonAccount = { display_name?: string; note?: string; url?: string; avatar?: string; avatar_static?: string; followers_count?: number; last_status_at?: string | null };
 
 async function mastodonAccount(handle: string): Promise<MastodonAccount | null> {
   const { isPublicHost } = await import("./open-web-rules");
@@ -450,7 +463,7 @@ export async function publicIntegrations(handle: string, mode: "pro" | "social" 
   const shown = visibleForMode(rows.map((r) => ({ ...toMine(r), row: r })), mode).filter((m) =>
     isShownPublicly(switches, m.provider),
   );
-  return Promise.all(
+  const all = await Promise.all(
     shown.map(async ({ row, ...m }) => {
       const cached = (row["status_json"] as IntegrationStatus | null) ?? null;
       const at = row["status_at"] ? Date.parse(String(row["status_at"])) : 0;
@@ -468,6 +481,8 @@ export async function publicIntegrations(handle: string, mode: "pro" | "social" 
       return { ...m, status: cached };
     }),
   );
+  // Live-status components only show while (recently) in use.
+  return all.filter((m) => isLiveActive(m.provider, m.status?.lastActiveAt ?? null));
 }
 
 /**

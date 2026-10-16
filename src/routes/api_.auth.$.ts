@@ -122,6 +122,16 @@ export async function handleAuthRequest({ request }: { request: Request }) {
       return providerNotConfigured(provider, missingProviderKeys(provider));
     }
 
+    if (appMode() === "admin" && request.method === "POST" && ALTCHA_PATHS.has(relativePath)) {
+      let email: unknown;
+      try { email = ((await request.clone().json()) as { email?: unknown }).email; } catch { email = undefined; }
+      const { canUseAdminEmail } = await import("@/lib/auth/owner-admin.server");
+      if (!(await canUseAdminEmail(email))) return Response.json(
+        { code: "admin_only", message: "Dit beheerportaal is uitsluitend toegankelijk voor geautoriseerde beheerders." },
+        { status: 403, headers: { "cache-control": "no-store" } },
+      );
+    }
+
     if (provider === "gitlab" && SOCIAL_BODY_PATHS.has(relativePath)) {
       const { gitlabRedirectUri } = await import("@/lib/better-auth.server");
       console.info(`[auth] gitlab redirect_uri=${gitlabRedirectUri()}`);
@@ -139,6 +149,16 @@ export async function handleAuthRequest({ request }: { request: Request }) {
     }
 
     const res = await createRoutAuth(request).handler(request);
+    if (res.status >= 400 && !/callback/.test(relativePath)) {
+      // Better Auth reports most failures as an error response, not a throw:
+      // log the exact payload server-side instead of only a bare status code.
+      try {
+        const body = await res.clone().text();
+        console.error("[BetterAuth Error]:", { status: res.status, body: body.slice(0, 2000), ...traceContext(request, relativePath) });
+      } catch {
+        /* a body-read failure must never break the response */
+      }
+    }
     if (/callback/.test(relativePath)) {
       // Better Auth reports state/cookie problems as a redirect with ?error=.
       const loc = res.headers.get("location") ?? "";
@@ -163,6 +183,7 @@ export async function handleAuthRequest({ request }: { request: Request }) {
     }
     return res;
   } catch (err) {
+    console.error("[BetterAuth Error]:", err);
     const raw = err instanceof Error ? err.message : String(err);
     console.error("[auth] handler failed:", {
       message: raw,
